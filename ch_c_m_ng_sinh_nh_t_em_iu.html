@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Chúc Mừng Sinh Nhật Em Iu ♥</title>
+  <style>
+    /* Reset & Pure Black Full-Screen Canvas Styling */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #000000;
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    #scene {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background-color: #000000;
+      touch-action: none;
+    }
+
+    /* Subtle Translucent Replay Button (Appears only after finale completes) */
+    #replay-btn {
+      position: fixed;
+      bottom: max(18px, env(safe-area-inset-bottom, 18px));
+      right: max(18px, env(safe-area-inset-right, 18px));
+      z-index: 10;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 9999px;
+      border: 1px solid rgba(255, 126, 179, 0.28);
+      background: rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(6px);
+      transition: opacity 0.8s ease, transform 0.8s ease, background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+    }
+
+    #replay-btn.visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+
+    #replay-btn:hover,
+    #replay-btn:active {
+      background: rgba(255, 107, 157, 0.18);
+      border-color: rgba(255, 126, 179, 0.55);
+      color: #ffffff;
+    }
+
+    #replay-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+  </style>
+</head>
+<body>
+  <!-- Full-Screen HTML5 Canvas -->
+  <canvas id="scene"></canvas>
+
+  <!-- Minimal Translucent Replay Control (Hidden until finale) -->
+  <button id="replay-btn" type="button" aria-label="Phát lại hiệu ứng">
+    <svg viewBox="0 0 24 24">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+    <span>Phát lại</span>
+  </button>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // =========================================================================
+      // 1. CANVAS & VIEWPORT SETUP
+      // =========================================================================
+      const canvas = document.getElementById('scene');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const replayBtn = document.getElementById('replay-btn');
+
+      // Offscreen canvas used to sample crisp pixel positions for text & heart
+      const offCanvas = document.createElement('canvas');
+      const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+
+      let width = window.innerWidth;
+      let height = window.innerHeight;
+      let dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      // Primary sans-serif stack supporting full Vietnamese diacritics cleanly
+      const FONT_STACK = "'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+      const MONO_STACK = "'Courier New', Courier, monospace";
+
+      // =========================================================================
+      // 2. TIMELINE CONFIGURATION (Exact seconds matching specification)
+      // =========================================================================
+      const TIMELINE = [
+        { id: 0, start: 0.0, end: 1.15, type: 'countdown', lines: ['3'] },
+        { id: 1, start: 1.15, end: 2.3, type: 'countdown', lines: ['2'] },
+        { id: 2, start: 2.3, end: 3.45, type: 'countdown', lines: ['1'] },
+        { id: 3, start: 3.45, end: 6.75, type: 'birthday', lines: ['Sinh nhật vui vẻ', 'nhé em iu'] },
+        { id: 4, start: 6.75, end: Infinity, type: 'finale', topName: 'Kevin', lines: ['Anh yêu em'], bottomName: 'Jenny' }
+      ];
+      const FINALE_START_TIME = TIMELINE[TIMELINE.length - 1].start;
+
+      let animationStartTime = performance.now();
+      let currentStageId = -1;
+      let finaleReached = false;
+
+      // =========================================================================
+      // 3. BACKGROUND MATRIX RAIN SYSTEM
+      // =========================================================================
+      const MATRIX_CHARS = '01LOVE♥*+•·°0123456789♥';
+      let matrixColumns = [];
+      let matrixFontSize = 13;
+
+      function initMatrixRain() {
+        matrixFontSize = Math.max(11, Math.min(15, Math.round(Math.min(width, height) * 0.022)));
+        const colSpacing = Math.max(14, matrixFontSize + 3);
+        const colCount = Math.ceil(width / colSpacing);
+        matrixColumns = [];
+
+        for (let i = 0; i < colCount; i++) {
+          const depth = 0.65 + Math.random() * 0.55; // Subtle depth variation across streams
+          const trailLength = 10 + Math.floor(Math.random() * 18);
+          const chars = [];
+          for (let j = 0; j < trailLength; j++) {
+            chars.push(MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)]);
+          }
+
+          matrixColumns.push({
+            x: i * colSpacing + colSpacing * 0.5,
+            y: Math.random() * (height + trailLength * matrixFontSize) - trailLength * matrixFontSize,
+            speed: (55 + Math.random() * 90) * depth,
+            depth: depth,
+            trailLength: trailLength,
+            chars: chars,
+            isPinkColumn: Math.random() < 0.2,
+            mutateTimer: Math.random() * 0.2
+          });
+        }
+      }
+
+      function updateAndDrawMatrixRain(dt) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (let i = 0; i < matrixColumns.length; i++) {
+          const col = matrixColumns[i];
+          const colFontSize = Math.round(matrixFontSize * col.depth);
+          ctx.font = `600 ${colFontSize}px ${MONO_STACK}`;
+
+          col.y += col.speed * dt;
+          col.mutateTimer += dt;
+
+          // Randomly mutate a character inside the stream for digital shimmer
+          if (col.mutateTimer > 0.14) {
+            col.mutateTimer = 0;
+            const idx = Math.floor(Math.random() * col.chars.length);
+            col.chars[idx] = MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
+          }
+
+          const totalStreamHeight = col.trailLength * colFontSize;
+          if (col.y - totalStreamHeight > height) {
+            col.y = -Math.random() * 120;
+            col.speed = (55 + Math.random() * 90) * col.depth;
+            col.isPinkColumn = Math.random() < 0.2;
+          }
+
+          // Render each character along the vertical drop
+          for (let j = 0; j < col.trailLength; j++) {
+            const charY = col.y - j * colFontSize;
+            if (charY < -colFontSize || charY > height + colFontSize) continue;
+
+            // Fade from head (j=0) to tail (j=trailLength-1) scaled by stream depth
+            const progress = 1 - j / col.trailLength;
+            const ch = col.chars[j];
+            const isHeart = ch === '♥';
+
+            if (j === 0) {
+              if (col.isPinkColumn || isHeart) {
+                ctx.fillStyle = `rgba(255, 158, 199, ${(0.55 * col.depth).toFixed(3)})`;
+              } else {
+                ctx.fillStyle = `rgba(255, 255, 255, ${(0.48 * col.depth).toFixed(3)})`;
+              }
+            } else {
+              const alpha = Math.max(0.04, progress * 0.32 * col.depth);
+              if ((col.isPinkColumn && j % 3 === 0) || isHeart) {
+                ctx.fillStyle = `rgba(255, 158, 199, ${Math.min(0.46, alpha * 1.3).toFixed(3)})`;
+              } else {
+                ctx.fillStyle = `rgba(235, 238, 245, ${alpha.toFixed(3)})`;
+              }
+            }
+
+            ctx.fillText(ch, col.x, charY);
+          }
+        }
+
+        ctx.restore();
+      }
+
+      // =========================================================================
+      // 4. PARTICLE SYSTEM & OFFSCREEN SHAPE SAMPLER
+      // =========================================================================
+      const PARTICLE_COUNT = width < 480 ? 3200 : 3800;
+      const particles = [];
+      const MICRO_GLYPHS = ['•', '·', '•', '·', '0', '1', '♥'];
+
+      // Pointer state for subtle interactive ripple
+      const pointer = {
+        x: -9999,
+        y: -9999,
+        active: false,
+        lastMoveTime: 0
+      };
+
+      // Heart center & scale tracked for rhythmic beating pulse in Finale
+      let heartCenter = { x: width * 0.5, y: height * 0.6 };
+      let heartScaleRadius = 120;
+
+      function createParticles() {
+        particles.length = 0;
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * Math.max(width, height) * 0.65;
+          const startX = width * 0.5 + Math.cos(angle) * dist;
+          const startY = height * 0.5 + Math.sin(angle) * dist;
+
+          particles.push({
+            x: startX,
+            y: startY,
+            vx: 0,
+            vy: 0,
+            tx: startX,
+            ty: startY,
+            baseTx: startX,
+            baseTy: startY,
+            size: 1.4 + Math.random() * 1.5,
+            glyph: MICRO_GLYPHS[Math.floor(Math.random() * MICRO_GLYPHS.length)],
+            isGlyph: Math.random() < 0.24, // Mix of glowing dots and tiny matrix micro-glyphs
+            phase: Math.random() * Math.PI * 2,
+            twinkleSpeed: 2.2 + Math.random() * 3.0,
+            isHeartParticle: false,
+            color: '#ffffff',
+            glowColor: 'rgba(255, 255, 255, 0.7)'
+          });
+        }
+      }
+
+      /**
+       * Computes a responsive font size so all lines fit safely inside viewport width & height
+       * without clipping Vietnamese diacritics on narrow screens.
+       */
+      function getFittedFontSize(lines, maxAllowedWidth, maxAllowedHeight, initialSize) {
+        let fontSize = initialSize;
+        const minFontSize = 18;
+
+        while (fontSize > minFontSize) {
+          offCtx.font = `900 ${fontSize}px ${FONT_STACK}`;
+          let widest = 0;
+          for (let i = 0; i < lines.length; i++) {
+            const w = offCtx.measureText(lines[i]).width;
+            if (w > widest) widest = w;
+          }
+          const totalHeight = lines.length * fontSize * 1.28;
+          if (widest <= maxAllowedWidth && totalHeight <= maxAllowedHeight) {
+            break;
+          }
+          fontSize -= 2;
+        }
+        return fontSize;
+      }
+
+      /**
+       * Draws a smooth, symmetrical parametric heart path on offCtx
+       */
+      function drawParametricHeartPath(context, cx, cy, scale) {
+        context.beginPath();
+        const steps = 180;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * Math.PI * 2;
+          // Classic symmetric parametric heart curve normalized to unit-ish radius
+          const rawX = 16 * Math.pow(Math.sin(t), 3);
+          const rawY = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+          const px = cx + (rawX / 16) * scale;
+          const py = cy + (rawY / 16) * scale - scale * 0.08;
+          if (i === 0) {
+            context.moveTo(px, py);
+          } else {
+            context.lineTo(px, py);
+          }
+        }
+        context.closePath();
+      }
+
+      /**
+       * Samples pixel coordinates from the offscreen canvas for the given stage.
+       * Uses color channels (Red = primary text, Blue = Kevin/Jenny names, Green = heart)
+       * to cleanly separate lettering and the pulsing heart in the finale.
+       */
+      function sampleTargetsForStage(stage) {
+        offCanvas.width = width;
+        offCanvas.height = height;
+        offCtx.clearRect(0, 0, width, height);
+
+        const isPortrait = height >= width;
+        const safeWidth = width * 0.86;
+
+        if (stage.type === 'countdown') {
+          // Large glowing white/soft-pink countdown digit ("3", "2", "1")
+          const targetHeight = height * 0.48;
+          const initialSize = Math.min(width * 0.55, height * 0.44, 300);
+          const fontSize = getFittedFontSize(stage.lines, safeWidth, targetHeight, initialSize);
+
+          offCtx.fillStyle = '#ff0000';
+          offCtx.font = `900 ${fontSize}px ${FONT_STACK}`;
+          offCtx.textAlign = 'center';
+          offCtx.textBaseline = 'middle';
+          offCtx.fillText(stage.lines[0], width * 0.5, height * 0.5);
+        } else if (stage.type === 'birthday') {
+          // Centered lines: "Sinh nhật vui vẻ" / "nhé em iu"
+          const targetHeight = height * 0.52;
+          const initialSize = isPortrait
+            ? Math.min(width * 0.13, height * 0.085, 76)
+            : Math.min(width * 0.085, height * 0.18, 84);
+          const fontSize = getFittedFontSize(stage.lines, safeWidth, targetHeight, initialSize);
+          const lineHeight = fontSize * 1.35;
+          const startY = height * 0.5 - ((stage.lines.length - 1) * lineHeight) * 0.5;
+
+          offCtx.fillStyle = '#ff0000';
+          offCtx.font = `900 ${fontSize}px ${FONT_STACK}`;
+          offCtx.textAlign = 'center';
+          offCtx.textBaseline = 'middle';
+
+          for (let i = 0; i < stage.lines.length; i++) {
+            offCtx.fillText(stage.lines[i], width * 0.5, startY + i * lineHeight);
+          }
+        } else if (stage.type === 'finale') {
+          // Balanced vertical stack with zero overlap across portrait & landscape:
+          // 1. "Kevin" (top) -> 2. "Anh yêu em" (middle) -> 3. "Jenny" (bottom text) -> 4. Beating Heart
+          const initialMainSize = isPortrait
+            ? Math.min(width * 0.13, height * 0.064, 66)
+            : Math.min(width * 0.075, height * 0.115, 66);
+          const mainFontSize = getFittedFontSize(stage.lines, safeWidth, height * 0.14, initialMainSize);
+          const nameFontSize = Math.max(18, Math.round(mainFontSize * 0.74));
+
+          const topPadding = isPortrait ? height * 0.095 : height * 0.08;
+          const lineGap = Math.max(8, mainFontSize * 0.24);
+
+          const kevinY = topPadding + nameFontSize * 0.55;
+          const anhYeuEmY = kevinY + nameFontSize * 0.55 + lineGap + mainFontSize * 0.55;
+          const jennyY = anhYeuEmY + mainFontSize * 0.55 + lineGap + nameFontSize * 0.55;
+          const textBottomY = jennyY + nameFontSize * 0.55;
+
+          offCtx.textAlign = 'center';
+          offCtx.textBaseline = 'middle';
+
+          // Draw "Kevin" & "Jenny" in BLUE channel (refined soft-pink/white lettering)
+          offCtx.fillStyle = '#0000ff';
+          offCtx.font = `800 ${nameFontSize}px ${FONT_STACK}`;
+          offCtx.fillText(stage.topName, width * 0.5, kevinY);
+          offCtx.fillText(stage.bottomName, width * 0.5, jennyY);
+
+          // Draw "Anh yêu em" in RED channel (prominent bold white-pink lettering)
+          offCtx.fillStyle = '#ff0000';
+          offCtx.font = `900 ${mainFontSize}px ${FONT_STACK}`;
+          offCtx.fillText(stage.lines[0], width * 0.5, anhYeuEmY);
+
+          // Compute heart size and center dynamically from remaining vertical space below "Jenny"
+          const bottomMargin = height * 0.075;
+          const heartTopGap = Math.max(14, height * 0.028);
+          const remainingHeight = Math.max(80, (height - bottomMargin) - (textBottomY + heartTopGap));
+          const maxRadiusByHeight = remainingHeight / 1.98; // Accounts for full 1.09x pulse amplitude
+          const maxRadiusByWidth = isPortrait ? width * 0.37 : width * 0.22;
+
+          heartCenter.x = width * 0.5;
+          heartScaleRadius = Math.max(36, Math.min(maxRadiusByWidth, maxRadiusByHeight, 200));
+
+          const minHeartCenterY = textBottomY + heartTopGap + 0.905 * heartScaleRadius;
+          const maxHeartCenterY = (height - bottomMargin) - 1.075 * heartScaleRadius;
+          heartCenter.y = (minHeartCenterY + Math.max(minHeartCenterY, maxHeartCenterY)) * 0.5;
+
+          // Draw filled multi-layered heart in GREEN channel
+          offCtx.fillStyle = '#00ff00';
+          drawParametricHeartPath(offCtx, heartCenter.x, heartCenter.y, heartScaleRadius);
+          offCtx.fill();
+
+          offCtx.lineWidth = Math.max(3, heartScaleRadius * 0.03);
+          offCtx.strokeStyle = '#00ff00';
+          offCtx.stroke();
+        }
+
+        // Read image data and collect candidate pixel positions
+        const imgData = offCtx.getImageData(0, 0, width, height).data;
+        const primaryTextPoints = [];
+        const nameTextPoints = [];
+        const heartPoints = [];
+
+        // Preliminary coarse scan to count lit pixels and choose an optimal sampling step
+        let litEstimate = 0;
+        const coarseStep = 4;
+        for (let y = 0; y < height; y += coarseStep) {
+          for (let x = 0; x < width; x += coarseStep) {
+            const idx = (y * width + x) * 4;
+            if (imgData[idx] > 128 || imgData[idx + 1] > 128 || imgData[idx + 2] > 128) {
+              litEstimate++;
+            }
+          }
+        }
+
+        const estimatedTotalPixels = litEstimate * coarseStep * coarseStep;
+        const step = Math.max(2, Math.floor(Math.sqrt(estimatedTotalPixels / PARTICLE_COUNT)));
+
+        for (let y = 0; y < height; y += step) {
+          for (let x = 0; x < width; x += step) {
+            const idx = (y * width + x) * 4;
+            const r = imgData[idx];
+            const g = imgData[idx + 1];
+            const b = imgData[idx + 2];
+
+            if (r > 128) {
+              primaryTextPoints.push({
+                x: x + (Math.random() - 0.5) * step * 0.72,
+                y: y + (Math.random() - 0.5) * step * 0.72,
+                kind: 'primaryText'
+              });
+            } else if (b > 128) {
+              nameTextPoints.push({
+                x: x + (Math.random() - 0.5) * step * 0.72,
+                y: y + (Math.random() - 0.5) * step * 0.72,
+                kind: 'nameText'
+              });
+            } else if (g > 128) {
+              heartPoints.push({
+                x: x + (Math.random() - 0.5) * step * 0.75,
+                y: y + (Math.random() - 0.5) * step * 0.75,
+                kind: 'heart'
+              });
+            }
+          }
+        }
+
+        // Fisher-Yates shuffle helper
+        function shuffle(arr) {
+          for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const tmp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = tmp;
+          }
+        }
+
+        shuffle(primaryTextPoints);
+        shuffle(nameTextPoints);
+        shuffle(heartPoints);
+
+        // Combine targets with balanced allocation during the finale
+        let finalTargets = [];
+        if (stage.type === 'finale' && primaryTextPoints.length > 0 && heartPoints.length > 0) {
+          const nameQuota = nameTextPoints.length > 0
+            ? Math.min(nameTextPoints.length * 2, Math.floor(PARTICLE_COUNT * 0.22))
+            : 0;
+          const primaryQuota = Math.min(primaryTextPoints.length * 2, Math.floor(PARTICLE_COUNT * 0.22));
+          const heartQuota = PARTICLE_COUNT - nameQuota - primaryQuota;
+
+          for (let i = 0; i < nameQuota; i++) {
+            finalTargets.push(nameTextPoints[i % nameTextPoints.length]);
+          }
+          for (let i = 0; i < primaryQuota; i++) {
+            finalTargets.push(primaryTextPoints[i % primaryTextPoints.length]);
+          }
+          for (let i = 0; i < heartQuota; i++) {
+            finalTargets.push(heartPoints[i % heartPoints.length]);
+          }
+          shuffle(finalTargets);
+        } else if (primaryTextPoints.length > 0) {
+          for (let i = 0; i < PARTICLE_COUNT; i++) {
+            finalTargets.push(primaryTextPoints[i % primaryTextPoints.length]);
+          }
+        } else {
+          for (let i = 0; i < PARTICLE_COUNT; i++) {
+            const a = (i / PARTICLE_COUNT) * Math.PI * 2;
+            finalTargets.push({
+              x: width * 0.5 + Math.cos(a) * 40,
+              y: height * 0.5 + Math.sin(a) * 40,
+              kind: 'primaryText'
+            });
+          }
+        }
+
+        // Vibrant romantic pink/rose palette (#ff2a78 to #ff85b3) for the multi-layered heart
+        const heartPalette = [
+          { color: '#ff2a78', glow: 'rgba(255, 42, 120, 0.9)' },
+          { color: '#ff2a78', glow: 'rgba(255, 42, 120, 0.9)' },
+          { color: '#ff5c97', glow: 'rgba(255, 92, 151, 0.88)' },
+          { color: '#ff85b3', glow: 'rgba(255, 133, 179, 0.88)' },
+          { color: '#ffd1e3', glow: 'rgba(255, 182, 210, 0.95)' }
+        ];
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const target = finalTargets[i];
+
+          p.baseTx = target.x;
+          p.baseTy = target.y;
+          p.tx = target.x;
+          p.ty = target.y;
+          p.isHeartParticle = target.kind === 'heart';
+
+          // Subtle dispersion burst when morphing to a new shape
+          const burstAngle = Math.random() * Math.PI * 2;
+          const burstSpeed = 1.5 + Math.random() * 4.5;
+          p.vx += Math.cos(burstAngle) * burstSpeed;
+          p.vy += Math.sin(burstAngle) * burstSpeed;
+
+          // Assign stage-appropriate glow & color palette
+          if (stage.type === 'countdown') {
+            p.color = Math.random() < 0.75 ? '#ffffff' : '#ffd6e7';
+            p.glowColor = 'rgba(255, 192, 218, 0.85)';
+          } else if (stage.type === 'birthday') {
+            p.color = '#ffffff';
+            p.glowColor = 'rgba(255, 133, 179, 0.88)';
+          } else if (stage.type === 'finale') {
+            if (target.kind === 'heart') {
+              const swatch = heartPalette[Math.floor(Math.random() * heartPalette.length)];
+              p.color = swatch.color;
+              p.glowColor = swatch.glow;
+            } else if (target.kind === 'nameText') {
+              // Refined glowing soft-pink/white lettering for "Kevin" & "Jenny"
+              p.color = Math.random() < 0.55 ? '#ff9ec7' : '#ffffff';
+              p.glowColor = 'rgba(255, 133, 179, 0.92)';
+            } else {
+              // Prominent bold white-pink lettering for "Anh yêu em"
+              p.color = '#ffffff';
+              p.glowColor = 'rgba(255, 107, 165, 0.95)';
+            }
+          }
+        }
+      }
+
+      // =========================================================================
+      // 5. FLOATING ROMANTIC HEART PARTICLES (FINALE AMBIENCE)
+      // =========================================================================
+      const floatingHearts = [];
+
+      function spawnFloatingHeart() {
+        const spreadX = Math.max(width * 0.42, heartScaleRadius * 1.4);
+        floatingHearts.push({
+          x: heartCenter.x + (Math.random() - 0.5) * 2 * spreadX,
+          y: heartCenter.y + heartScaleRadius * (0.2 + Math.random() * 0.7),
+          vy: 28 + Math.random() * 38, // upward drift speed (px/s)
+          swayAmp: 12 + Math.random() * 20,
+          swayFreq: 1.5 + Math.random() * 1.8,
+          phase: Math.random() * Math.PI * 2,
+          size: 10 + Math.random() * 11,
+          life: 0,
+          maxLife: 3.4 + Math.random() * 2.2,
+          color: Math.random() < 0.65 ? '#ff7eb3' : '#ff2a6d'
+        });
+      }
+
+      function updateAndDrawFloatingHearts(dt, isFinale) {
+        if (isFinale && floatingHearts.length < 26 && Math.random() < dt * 7.5) {
+          spawnFloatingHeart();
+        }
+
+        if (floatingHearts.length === 0) return;
+
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (let i = floatingHearts.length - 1; i >= 0; i--) {
+          const fh = floatingHearts[i];
+          fh.life += dt;
+          if (fh.life >= fh.maxLife) {
+            floatingHearts.splice(i, 1);
+            continue;
+          }
+
+          fh.y -= fh.vy * dt;
+          const currentX = fh.x + Math.sin(fh.life * fh.swayFreq + fh.phase) * fh.swayAmp;
+
+          // Smooth fade-in and fade-out envelope
+          const progress = fh.life / fh.maxLife;
+          let alpha = 1;
+          if (progress < 0.2) {
+            alpha = progress / 0.2;
+          } else if (progress > 0.65) {
+            alpha = (1 - progress) / 0.35;
+          }
+          alpha = Math.max(0, Math.min(0.85, alpha * 0.85));
+
+          ctx.globalAlpha = alpha;
+          ctx.font = `700 ${Math.round(fh.size)}px ${FONT_STACK}`;
+          ctx.fillStyle = fh.color;
+          ctx.shadowColor = fh.color;
+          ctx.shadowBlur = 10;
+          ctx.fillText('♥', currentX, fh.y);
+        }
+
+        ctx.restore();
+      }
+
+      // =========================================================================
+      // 6. MAIN PARTICLE PHYSICS & RENDERING LOOP
+      // =========================================================================
+      function updateAndDrawParticles(dt, elapsed, isFinale) {
+        // Rhythmic heartbeat pulse factor (lub-dub wave) for finale heart
+        let heartPulse = 1;
+        if (isFinale) {
+          const beatTime = (elapsed - FINALE_START_TIME) * 2.35; // ~70 BPM gentle romantic pulse
+          const primaryBeat = Math.pow(Math.max(0, Math.sin(beatTime * Math.PI)), 6);
+          const secondaryBeat = Math.pow(Math.max(0, Math.sin((beatTime - 0.22) * Math.PI)), 8) * 0.55;
+          heartPulse = 1 + (primaryBeat + secondaryBeat) * 0.085;
+        }
+
+        // Pointer ripple decay if idle
+        const pointerActive = pointer.active && (performance.now() - pointer.lastMoveTime < 180);
+        const rippleRadius = Math.min(width, height) * 0.16;
+        const rippleRadiusSq = rippleRadius * rippleRadius;
+
+        // Spring physics constants tuned for snappy yet silky morphing
+        const springStiffness = 0.085;
+        const damping = 0.82;
+
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+
+          // Compute dynamic target (applies heartbeat expansion to heart particles in finale)
+          if (isFinale && p.isHeartParticle) {
+            const dxFromHeart = p.baseTx - heartCenter.x;
+            const dyFromHeart = p.baseTy - heartCenter.y;
+            p.tx = heartCenter.x + dxFromHeart * heartPulse;
+            p.ty = heartCenter.y + dyFromHeart * heartPulse;
+          } else {
+            p.tx = p.baseTx;
+            p.ty = p.baseTy;
+          }
+
+          // Spring pull toward target
+          const ax = (p.tx - p.x) * springStiffness;
+          const ay = (p.ty - p.y) * springStiffness;
+          p.vx = (p.vx + ax) * damping;
+          p.vy = (p.vy + ay) * damping;
+
+          // Subtle interactive pointer/finger ripple
+          if (pointerActive) {
+            const dx = p.x - pointer.x;
+            const dy = p.y - pointer.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < rippleRadiusSq && distSq > 0.01) {
+              const dist = Math.sqrt(distSq);
+              const force = (1 - dist / rippleRadius) * 3.6;
+              p.vx += (dx / dist) * force;
+              p.vy += (dy / dist) * force;
+            }
+          }
+
+          p.x += p.vx;
+          p.y += p.vy;
+
+          // Subtle twinkle modulation
+          const twinkle = 0.72 + 0.28 * Math.sin(elapsed * p.twinkleSpeed + p.phase);
+
+          ctx.globalAlpha = twinkle;
+          ctx.fillStyle = p.color;
+          ctx.shadowColor = p.glowColor;
+          ctx.shadowBlur = isFinale && p.isHeartParticle ? 9 : 7;
+
+          if (p.isGlyph) {
+            ctx.font = `700 ${Math.round(p.size * 4.4)}px ${MONO_STACK}`;
+            ctx.fillText(p.glyph, p.x, p.y);
+          } else {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        ctx.restore();
+      }
+
+      // =========================================================================
+      // 7. ANIMATION CONTROLLER & REPLAY LOGIC
+      // =========================================================================
+      function getStageForElapsed(elapsed) {
+        for (let i = 0; i < TIMELINE.length; i++) {
+          if (elapsed >= TIMELINE[i].start && elapsed < TIMELINE[i].end) {
+            return TIMELINE[i];
+          }
+        }
+        return TIMELINE[TIMELINE.length - 1];
+      }
+
+      function replayAnimation() {
+        animationStartTime = performance.now();
+        currentStageId = -1;
+        finaleReached = false;
+        floatingHearts.length = 0;
+        replayBtn.classList.remove('visible');
+
+        // Gently scatter existing particles outward before 3 -> 2 -> 1 reassembles
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const a = Math.random() * Math.PI * 2;
+          const spd = 4 + Math.random() * 9;
+          p.vx += Math.cos(a) * spd;
+          p.vy += Math.sin(a) * spd;
+        }
+      }
+
+      let lastFrameTime = performance.now();
+
+      function animate(now) {
+        const dt = Math.min((now - lastFrameTime) / 1000, 0.05); // Cap dt for tab-switch stability
+        lastFrameTime = now;
+
+        const elapsed = (now - animationStartTime) / 1000;
+        const activeStage = getStageForElapsed(elapsed);
+
+        // Trigger shape morph when entering a new timeline stage
+        if (activeStage.id !== currentStageId) {
+          currentStageId = activeStage.id;
+          sampleTargetsForStage(activeStage);
+
+          if (activeStage.type === 'finale' && !finaleReached) {
+            finaleReached = true;
+            replayBtn.classList.add('visible');
+          }
+        }
+
+        // 1. Pure black (#000000) background clear
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, width, height);
+
+        // 2. Background Matrix digital rain
+        updateAndDrawMatrixRain(dt);
+
+        // 3. Delicate upward-drifting hearts during finale
+        updateAndDrawFloatingHearts(dt, activeStage.type === 'finale');
+
+        // 4. Foreground luminous text & heart particles
+        updateAndDrawParticles(dt, elapsed, activeStage.type === 'finale');
+
+        requestAnimationFrame(animate);
+      }
+
+      // =========================================================================
+      // 8. RESPONSIVE RESIZE & INTERACTION HANDLERS
+      // =========================================================================
+      function handleResize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        initMatrixRain();
+
+        // Re-sample current stage targets so text & heart stay centered and proportional
+        const elapsed = (performance.now() - animationStartTime) / 1000;
+        const stage = getStageForElapsed(elapsed);
+        sampleTargetsForStage(stage);
+      }
+
+      // Track pointer movement for gentle particle ripples + distinguish quick tap to replay
+      let pointerDownPos = { x: 0, y: 0, time: 0 };
+
+      canvas.addEventListener('pointerdown', function (e) {
+        pointer.x = e.clientX;
+        pointer.y = e.clientY;
+        pointer.active = true;
+        pointer.lastMoveTime = performance.now();
+
+        pointerDownPos = {
+          x: e.clientX,
+          y: e.clientY,
+          time: performance.now()
+        };
+      });
+
+      canvas.addEventListener('pointermove', function (e) {
+        pointer.x = e.clientX;
+        pointer.y = e.clientY;
+        pointer.active = true;
+        pointer.lastMoveTime = performance.now();
+      });
+
+      canvas.addEventListener('pointerup', function (e) {
+        pointer.active = false;
+
+        // If finale has been reached and user performs a quick tap/click (not a long drag), replay!
+        if (finaleReached) {
+          const dx = e.clientX - pointerDownPos.x;
+          const dy = e.clientY - pointerDownPos.y;
+          const dist = Math.hypot(dx, dy);
+          const duration = performance.now() - pointerDownPos.time;
+
+          if (dist < 18 && duration < 450) {
+            replayAnimation();
+          }
+        }
+      });
+
+      canvas.addEventListener('pointercancel', function () {
+        pointer.active = false;
+      });
+
+      replayBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        replayAnimation();
+      });
+
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('orientationchange', function () {
+        setTimeout(handleResize, 120);
+      });
+
+      // Initialize everything cleanly on load
+      window.addEventListener('load', function () {
+        createParticles();
+        handleResize();
+        animationStartTime = performance.now();
+        lastFrameTime = animationStartTime;
+        requestAnimationFrame(animate);
+      });
+    })();
+  </script>
+</body>
+</html>
